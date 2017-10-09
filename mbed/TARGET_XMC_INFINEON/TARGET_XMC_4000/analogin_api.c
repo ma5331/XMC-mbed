@@ -18,8 +18,6 @@ bool m_vadc_initialized = false;
 
 void analogin_init(analogin_t *obj, PinName pin)
 {
-	uint32_t group_nr;
-
 	obj->adc = (ADCName)pinmap_peripheral(pin, PinMap_ADC);
 	MBED_ASSERT(obj->adc != (ADCName)NC);
 

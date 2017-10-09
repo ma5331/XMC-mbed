@@ -102,7 +102,7 @@ void MPU9150::initialiseDMP(){
 
     setMemoryBank(0);
     // check OTP bank valid
-    uint8_t otpValid = getOTPBankValid();
+//    uint8_t otpValid = getOTPBankValid();
 //    debug.printf("optValid: %d\r\n", otpValid);
 
     //Enabling interrupt latch, clear on any read, AUX bypass enabled

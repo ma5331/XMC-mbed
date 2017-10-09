@@ -161,8 +161,6 @@ int i2c_write(i2c_t *obj, int address, const char *data, int length, int stop)
 
 int i2c_read(i2c_t *obj, int address, char *data, int length, int stop)
 {
-	int i=0;
-
 	struct i2c_s* obj_s = I2C_S(obj);
 
 	while(XMC_USIC_CH_TXFIFO_IsFull((XMC_USIC_CH_t*)obj_s->i2c));
@@ -206,7 +204,6 @@ int i2c_read(i2c_t *obj, int address, char *data, int length, int stop)
 	while(XMC_USIC_CH_RXFIFO_IsEmpty((XMC_USIC_CH_t*)obj_s->i2c));
 	data[length-1] = XMC_I2C_CH_GetReceivedData((XMC_USIC_CH_t*)obj_s->i2c);
 
-	uint8_t level = XMC_USIC_CH_RXFIFO_GetLevel((XMC_USIC_CH_t*)obj_s->i2c);
 
 	while(!XMC_USIC_CH_TXFIFO_IsEmpty((XMC_USIC_CH_t*)obj_s->i2c));
 
@@ -383,7 +380,6 @@ uint32_t i2c_irq_handler_asynch(i2c_t *obj)
 					while (obj->tx_buff.pos < obj->tx_buff.length)
 					{
 						while (XMC_USIC_CH_TXFIFO_IsFull((XMC_USIC_CH_t*)obj_s->i2c));
-						uint8_t test = *((uint8_t*)obj->tx_buff.buffer);
 						XMC_I2C_CH_MasterTransmit((XMC_USIC_CH_t*)obj_s->i2c, ((uint8_t*)obj->tx_buff.buffer)[obj->tx_buff.pos++]);
 					}
 
@@ -473,6 +469,8 @@ uint32_t i2c_irq_handler_asynch(i2c_t *obj)
 
 					XMC_USIC_CH_RXFIFO_ClearEvent((XMC_USIC_CH_t*)obj_s->i2c, XMC_USIC_CH_RXFIFO_EVENT_ALTERNATE | XMC_USIC_CH_RXFIFO_EVENT_STANDARD);
 				}
+				break;
+			default:
 				break;
 		}
 	}

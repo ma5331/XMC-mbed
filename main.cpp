@@ -190,136 +190,136 @@
 //	}
 //}
 
-//#include "TextLCD.h"
-//
-//DigitalOut RW(p0_3, 0);
-//TextLCD LCD(p0_2, p0_4, p1_9, p1_10, p1_11, p1_12, TextLCD::LCD20x4);
-//
-//DigitalIn Enable(p1_4);
-//
-//AnalogIn ADC1(p14_1);
-//AnalogIn ADC2(p14_2);
-//AnalogIn ADC3(p14_3);
-//AnalogIn ADC4(p14_4);
-//AnalogIn MODUL(p14_5);
-//
-//PwmOut PWM1(p1_3);
-//PwmOut PWM2(p1_2);
-//PwmOut PWM3(p1_1);
-//PwmOut PWM4(p1_0);
-//
-//Timer RefreshLCD;
-//
-//void printHeader(uint8_t module_nr, uint8_t enable)
-//{
-//	uint16_t wl_1, wl_2;
-//
-//	switch (module_nr)
-//	{
-//		case 1:
-//			wl_1 = 295;
-//			wl_2 = 310;
-//			break;
-//		case 2:
-//			wl_1 = 285;
-//			wl_2 = 365;
-//			break;
-//		case 3:
-//			wl_1 = 340;
-//			wl_2 = 375;
-//			break;
-//	}
-//
-//	LCD.locate(9,0);
-//	if (enable)
-//		LCD.printf("MODUL %d On ", module_nr);
-//	else
-//		LCD.printf("MODUL %d Off", module_nr);
-//	LCD.locate(0,1);
-//	LCD.printf(" VIS  %d  %d  VIS ", wl_1, wl_2);
-//}
-//
-//void printData(uint8_t duty1, uint8_t duty2, uint8_t duty3, uint8_t duty4)
-//{
-//	LCD.locate(0, 3);
-//	LCD.printf(" %03d  %03d  %03d  %03d ", duty1, duty2, duty3, duty4);
-//}
-//
-//int main()
-//{
-//	float adc1=0;
-//	float adc2=0;
-//	float adc3=0;
-//	float adc4=0;
-//
-//	Enable.mode(PullUp);
-//
-//	PWM1.pulsewidth_ms(1);
-//	PWM2.pulsewidth_ms(1);
-//	PWM3.pulsewidth_ms(1);
-//	PWM4.pulsewidth_ms(1);
-//
-//	LCD.cls();
-//	RefreshLCD.start();
-//
-//	while(1)
-//	{
-//		uint8_t enable = !Enable;
-//
-//		adc1 += (0.01)*(ADC1 - adc1);
-//		adc2 += (0.01)*(ADC2 - adc2);
-//		adc3 += (0.01)*(ADC3 - adc3);
-//		adc4 += (0.01)*(ADC4 - adc4);
-//
-//		int duty1 = (int)(adc1*100);
-//		int duty2 = (int)(adc2*100);
-//		int duty3 = (int)(adc3*100);
-//		int duty4 = (int)(adc4*100);
-//
-//		uint8_t mod;
-//
-//		if (MODUL < 0.33)
-//			mod = 1;
-//		else if(MODUL < 0.67)
-//			mod = 2;
-//		else
-//			mod = 3;
-//
-//		if (enable)
-//		{
-//			if (duty1 > 1)
-//				PWM1.write(duty1/100.0);
-//			else
-//				PWM1.write(0);
-//			if (duty2 > 1)
-//				PWM2.write(duty2/100.0);
-//			else
-//				PWM2.write(0);
-//			if (duty3 > 1)
-//				PWM3.write(duty3/100.0);
-//			else
-//				PWM3.write(0);
-//			if (duty4 > 1)
-//				PWM4.write(duty4/100.0);
-//			else
-//				PWM4.write(0);
-//		}
-//		else
-//		{
-//			PWM1.write(0);
-//			PWM2.write(0);
-//			PWM3.write(0);
-//			PWM4.write(0);
-//		}
-//
-//		if (RefreshLCD.read_ms() > 10)
-//		{
-//			printHeader(mod, enable);
-//			printData(duty1, duty2, duty3, duty4);
-//			RefreshLCD.reset();
-//		}
-//	}
-//}
+#include "TextLCD.h"
+
+DigitalOut RW(p0_3, 0);
+TextLCD LCD(p0_2, p0_4, p1_9, p1_10, p1_11, p1_12, TextLCD::LCD20x4);
+
+DigitalIn Enable(p1_4);
+
+AnalogIn ADC1(p14_1);
+AnalogIn ADC2(p14_2);
+AnalogIn ADC3(p14_3);
+AnalogIn ADC4(p14_4);
+AnalogIn MODUL(p14_5);
+
+PwmOut PWM1(p1_3);
+PwmOut PWM2(p1_2);
+PwmOut PWM3(p1_1);
+PwmOut PWM4(p1_0);
+
+Timer RefreshLCD;
+
+void printHeader(uint8_t module_nr, uint8_t enable)
+{
+	uint16_t wl_1, wl_2;
+
+	switch (module_nr)
+	{
+		case 1:
+			wl_1 = 295;
+			wl_2 = 310;
+			break;
+		case 2:
+			wl_1 = 285;
+			wl_2 = 365;
+			break;
+		case 3:
+			wl_1 = 340;
+			wl_2 = 375;
+			break;
+	}
+
+	LCD.locate(9,0);
+	if (enable)
+		LCD.printf("MODUL %d On ", module_nr);
+	else
+		LCD.printf("MODUL %d Off", module_nr);
+	LCD.locate(0,1);
+	LCD.printf(" VIS  %d  %d  VIS ", wl_1, wl_2);
+}
+
+void printData(uint8_t duty1, uint8_t duty2, uint8_t duty3, uint8_t duty4)
+{
+	LCD.locate(0, 3);
+	LCD.printf(" %03d  %03d  %03d  %03d ", duty1, duty2, duty3, duty4);
+}
+
+int main()
+{
+	float adc1=0;
+	float adc2=0;
+	float adc3=0;
+	float adc4=0;
+
+	Enable.mode(PullUp);
+
+	PWM1.pulsewidth_ms(1);
+	PWM2.pulsewidth_ms(1);
+	PWM3.pulsewidth_ms(1);
+	PWM4.pulsewidth_ms(1);
+
+	LCD.cls();
+	RefreshLCD.start();
+
+	while(1)
+	{
+		uint8_t enable = !Enable;
+
+		adc1 += (0.01)*(ADC1 - adc1);
+		adc2 += (0.01)*(ADC2 - adc2);
+		adc3 += (0.01)*(ADC3 - adc3);
+		adc4 += (0.01)*(ADC4 - adc4);
+
+		int duty1 = (int)(adc1*100);
+		int duty2 = (int)(adc2*100);
+		int duty3 = (int)(adc3*100);
+		int duty4 = (int)(adc4*100);
+
+		uint8_t mod;
+
+		if (MODUL < 0.33)
+			mod = 1;
+		else if(MODUL < 0.67)
+			mod = 2;
+		else
+			mod = 3;
+
+		if (enable)
+		{
+			if (duty1 > 1)
+				PWM1.write(duty1/100.0);
+			else
+				PWM1.write(0);
+			if (duty2 > 1)
+				PWM2.write(duty2/100.0);
+			else
+				PWM2.write(0);
+			if (duty3 > 1)
+				PWM3.write(duty3/100.0);
+			else
+				PWM3.write(0);
+			if (duty4 > 1)
+				PWM4.write(duty4/100.0);
+			else
+				PWM4.write(0);
+		}
+		else
+		{
+			PWM1.write(0);
+			PWM2.write(0);
+			PWM3.write(0);
+			PWM4.write(0);
+		}
+
+		if (RefreshLCD.read_ms() > 10)
+		{
+			printHeader(mod, enable);
+			printData(duty1, duty2, duty3, duty4);
+			RefreshLCD.reset();
+		}
+	}
+}
 
 //Timer timer;
 //DigitalOut led(LED1);
@@ -394,51 +394,51 @@
 //	}
 //}
 
-#include "MPU9250.h"
-
-MPU9250 mpu(p5_0, p5_2);
-
-char tx[] = {0x3b};
-char rx[] = {0,0,0,0,0,0};
-
-void i2c_callback(int event)
-{
-	printf("%d %d %d %d %d %d", rx[0],rx[1],rx[2],rx[3],rx[4],rx[5]);
-}
-
-int main()
-{
-	int16_t acc[3] = {0};
-	float dest[3];
-//	char data[20] = {0};
-//	char test = 52;
+//#include "MPU9250.h"
 //
-	mpu.initMPU9250();
-	mpu.initAK8963(dest);
-
-	mpu.readAccelData(acc);
-//	mpu.i2c_->write(0x68<<1, &test, 1, 1);
-//	mpu.i2c_->read(0x68<<1, (char*)data, 20, 0);
+//MPU9250 mpu(p5_0, p5_2);
 //
-//	mpu.i2c_->start();
-//	mpu.i2c_->write(0xd0);
-//	mpu.i2c_->write(0x3b);
-//	mpu.i2c_->stop();
-//	mpu.i2c_->start();
-//	mpu.i2c_->write(0xd1);
-//	uint8_t hb = mpu.i2c_->read(1);
-//	uint8_t lb = mpu.i2c_->read(0);
-//	mpu.i2c_->stop();
-
-
-
-	mpu.i2c_->transfer(0xd0, tx, sizeof(tx), rx, sizeof(rx), i2c_callback);
-
-	while(1)
-	{
-
-	}
-}
+//char tx[] = {0x3b};
+//char rx[] = {0,0,0,0,0,0};
+//
+//void i2c_callback(int event)
+//{
+//	printf("%d %d %d %d %d %d", rx[0],rx[1],rx[2],rx[3],rx[4],rx[5]);
+//}
+//
+//int main()
+//{
+//	int16_t acc[3] = {0};
+//	float dest[3];
+////	char data[20] = {0};
+////	char test = 52;
+////
+//	mpu.initMPU9250();
+//	mpu.initAK8963(dest);
+//
+//	mpu.readAccelData(acc);
+////	mpu.i2c_->write(0x68<<1, &test, 1, 1);
+////	mpu.i2c_->read(0x68<<1, (char*)data, 20, 0);
+////
+////	mpu.i2c_->start();
+////	mpu.i2c_->write(0xd0);
+////	mpu.i2c_->write(0x3b);
+////	mpu.i2c_->stop();
+////	mpu.i2c_->start();
+////	mpu.i2c_->write(0xd1);
+////	uint8_t hb = mpu.i2c_->read(1);
+////	uint8_t lb = mpu.i2c_->read(0);
+////	mpu.i2c_->stop();
+//
+//
+//
+//	mpu.i2c_->transfer(0xd0, tx, sizeof(tx), rx, sizeof(rx), i2c_callback);
+//
+//	while(1)
+//	{
+//
+//	}
+//}
 
 //#include "MPU9150.h"
 //#include "Quaternion.h"

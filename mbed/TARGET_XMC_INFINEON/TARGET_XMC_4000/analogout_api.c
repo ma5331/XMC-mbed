@@ -17,7 +17,7 @@
 void analogout_init(dac_t *obj, PinName pin)
 {
 	obj->dac = (DACName)pinmap_peripheral(pin, PinMap_DAC);
-	MBED_ASSERT(obj->dac != (ADCName)NC);
+	MBED_ASSERT(obj->dac != (DACName)NC);
 
 	//4bit group, 4bit channel
 	obj->channel_no = pinmap_function(pin, PinMap_DAC);

@@ -27,55 +27,55 @@ extern "C" {
 #define STDIO_UART        UART_1
 
 typedef enum {
-    UART_1 = (int)USIC0_CH0,
-	UART_2 = (int)USIC0_CH1,
-	UART_3 = (int)USIC1_CH0,
-	UART_4 = (int)USIC1_CH1,
-	UART_5 = (int)USIC2_CH0,
-	UART_6 = (int)USIC2_CH1,
+    UART_1 = 0x40030000UL,
+	UART_2 = 0x40030200UL,
+	UART_3 = 0x48020000UL,
+	UART_4 = 0x48020200UL,
+	UART_5 = 0x48024000UL,
+	UART_6 = 0x48024200UL,
 
 } UARTName;
 
 
 typedef enum {
-    SPI_0 = (int)USIC0_CH0_BASE,
-    SPI_1 = (int)USIC0_CH1_BASE,
-    SPIS = (int)USIC0_CH0_BASE
+    SPI_0 = 0x40030000UL,
+    SPI_1 = 0x40030200UL,
+    SPIS = 0x40030000UL
 } SPIName;
 
 typedef enum {
-    PWM_1  = (int)CCU40_CC40,
-    PWM_2  = (int)CCU40_CC41,
-	PWM_3  = (int)CCU40_CC42,
-	PWM_4  = (int)CCU40_CC43,
-    PWM_5  = (int)CCU41_CC40,
-    PWM_6  = (int)CCU41_CC41,
-	PWM_7  = (int)CCU41_CC42,
-	PWM_8  = (int)CCU41_CC43,
-    PWM_9  = (int)CCU42_CC40,
-    PWM_10 = (int)CCU42_CC41,
-	PWM_11 = (int)CCU42_CC42,
-	PWM_12 = (int)CCU42_CC43,
+    PWM_1  = 0x4000C100UL,
+    PWM_2  = 0x4000C200UL,
+	PWM_3  = 0x4000C300UL,
+	PWM_4  = 0x4000C400UL,
+    PWM_5  = 0x40010100UL,
+    PWM_6  = 0x40010200UL,
+	PWM_7  = 0x40010300UL,
+	PWM_8  = 0x40010400UL,
+    PWM_9  = 0x40014100UL,
+    PWM_10 = 0x40014200UL,
+	PWM_11 = 0x40014300UL,
+	PWM_12 = 0x40014400UL,
 } PWMName;
 
 typedef enum {
-    I2C_1 = (int)USIC0_CH0,
-	I2C_2 = (int)USIC0_CH1,
-	I2C_3 = (int)USIC1_CH0,
-	I2C_4 = (int)USIC1_CH1,
-	I2C_5 = (int)USIC2_CH0,
-	I2C_6 = (int)USIC2_CH1,
+    I2C_1 = 0x40030000UL,
+	I2C_2 = 0x40030200UL,
+	I2C_3 = 0x48020000UL,
+	I2C_4 = 0x48020200UL,
+	I2C_5 = 0x48024000UL,
+	I2C_6 = 0x48024200UL,
 } I2CName;
 
 typedef enum {
-	DAC_0 = (int)DAC,
+	DAC_0 = 0x48018000UL,
 } DACName;
 
 typedef enum {
-    VADC_0 = (int)VADC_G0,
-	VADC_1 = (int)VADC_G1,
-	VADC_2 = (int)VADC_G2,
-	VADC_3 = (int)VADC_G3,
+    VADC_0 = 0x40004400UL,
+	VADC_1 = 0x40004800UL,
+	VADC_2 = 0x40004C00UL,
+	VADC_3 = 0x40005000UL,
 } ADCName;
 
 #ifdef __cplusplus

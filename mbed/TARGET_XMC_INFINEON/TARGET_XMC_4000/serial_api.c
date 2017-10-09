@@ -537,8 +537,6 @@ static IRQn_Type serial_get_rx_irq_n(serial_t *obj)
  */
 int serial_tx_asynch(serial_t *obj, const void *tx, size_t tx_length, uint8_t tx_width, uint32_t handler, uint32_t event, DMAUsage hint)
 {
-	uint8_t trigger_level=0;
-
     // TODO: DMA usage is currently ignored
     (void) hint;
 
@@ -569,6 +567,8 @@ int serial_tx_asynch(serial_t *obj, const void *tx, size_t tx_length, uint8_t tx
 
     XMC_USIC_CH_TXFIFO_EnableEvent((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_TXFIFO_EVENT_CONF_STANDARD);
     XMC_USIC_CH_TriggerServiceRequest((XMC_USIC_CH_t*)obj_s->uart, 0 + (2*obj_s->channel));
+
+    return tx_length;
 }
 
 /**
