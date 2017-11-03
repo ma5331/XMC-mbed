@@ -81,6 +81,9 @@ struct i2c_s {
 	PinName scl;
     uint8_t repeated_start;
     uint8_t start_condition_byte;
+#if DEVICE_I2CSLAVE
+    uint8_t slave;
+#endif
 #if DEVICE_I2C_ASYNCH
     uint32_t address;
     uint8_t stop;
@@ -102,7 +105,10 @@ struct analogin_s {
 };
 
 struct gpio_irq_s {
-
+	uint32_t*	eru;
+	uint8_t		etl;
+	IRQn_Type	irq_n;
+	PinName		pin;
 };
 
 #include <gpio_object.h>

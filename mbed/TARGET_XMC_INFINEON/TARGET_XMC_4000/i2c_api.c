@@ -38,8 +38,8 @@ void i2c_init(i2c_t *obj, PinName sda, PinName scl)
 	};
 
 	XMC_I2C_CH_Init((XMC_USIC_CH_t*)obj_s->i2c, &config);
-	XMC_USIC_CH_SetInputSource((XMC_USIC_CH_t*)obj_s->i2c, XMC_USIC_CH_INPUT_DX0, sda_source);
-	XMC_USIC_CH_SetInputSource((XMC_USIC_CH_t*)obj_s->i2c, XMC_USIC_CH_INPUT_DX1, scl_source);
+	XMC_USIC_CH_SetInputSource((XMC_USIC_CH_t*)obj_s->i2c, XMC_I2C_CH_INPUT_SDA, sda_source);
+	XMC_USIC_CH_SetInputSource((XMC_USIC_CH_t*)obj_s->i2c, XMC_I2C_CH_INPUT_SCL, scl_source);
 
 	// Configuration FIFO
 	switch (obj_s->i2c)
@@ -255,13 +255,84 @@ int i2c_byte_write(i2c_t *obj, int data)
 		uint32_t flag = XMC_I2C_CH_GetStatusFlag((XMC_USIC_CH_t*)obj_s->i2c);
 
 		if (flag & XMC_I2C_CH_STATUS_FLAG_ACK_RECEIVED)
+		{
+			XMC_I2C_CH_ClearStatusFlag((XMC_USIC_CH_t*)obj_s->i2c, XMC_I2C_CH_STATUS_FLAG_ACK_RECEIVED);
 			return 1;
+		}
 		else if (flag & XMC_I2C_CH_STATUS_FLAG_NACK_RECEIVED)
+		{
+			XMC_I2C_CH_ClearStatusFlag((XMC_USIC_CH_t*)obj_s->i2c, XMC_I2C_CH_STATUS_FLAG_NACK_RECEIVED);
 			return 0;
+		}
 	}
 
 	return 2;
 }
+
+#if DEVICE_I2CSLAVE
+
+// See I2CSlave.h
+#define NoData         0 // the slave has not been addressed
+#define ReadAddressed  1 // the master has requested a read from this slave (slave = transmitter)
+#define WriteGeneral   2 // the master is writing to all slave
+#define WriteAddressed 3 // the master is writing to this slave (slave = receiver)
+
+void i2c_slave_mode(i2c_t *obj, int enable_slave) {
+
+    struct i2c_s *obj_s = I2C_S(obj);
+
+    if (enable_slave) {
+        obj_s->slave = 1;
+    } else {
+        obj_s->slave = 0;
+    }
+}
+
+void i2c_slave_address(i2c_t *obj, int idx, uint32_t address, uint32_t mask)
+{
+	struct i2c_s *obj_s = I2C_S(obj);
+
+	obj_s->address = address;
+
+	while (XMC_I2C_CH_Stop((XMC_USIC_CH_t*)obj_s->i2c) == XMC_I2C_CH_STATUS_BUSY);
+
+	XMC_I2C_CH_CONFIG_t config =
+	{
+		.baudrate = 100000,
+		.address = address,
+	};
+	XMC_I2C_CH_Init((XMC_USIC_CH_t*)obj_s->i2c, &config);
+	XMC_I2C_CH_Start((XMC_USIC_CH_t*)obj_s->i2c);
+}
+
+int i2c_slave_receive(i2c_t *obj)
+{
+	struct i2c_s *obj_s = I2C_S(obj);
+	int retValue = NoData;
+
+	if (XMC_I2C_CH_GetStatusFlag((XMC_USIC_CH_t*)obj_s->i2c) & XMC_I2C_CH_STATUS_FLAG_SLAVE_READ_REQUESTED)
+	{
+		retValue = ReadAddressed;
+		XMC_I2C_CH_ClearStatusFlag((XMC_USIC_CH_t*)obj_s->i2c, XMC_I2C_CH_STATUS_FLAG_SLAVE_READ_REQUESTED);
+	}
+
+	return retValue;
+}
+
+int i2c_slave_write(i2c_t *obj, const char *data, int length)
+{
+	struct i2c_s* obj_s = I2C_S(obj);
+
+	for (int i=0; i<length; i++)
+	{
+		while(XMC_USIC_CH_TXFIFO_IsFull((XMC_USIC_CH_t*)obj_s->i2c));
+		XMC_I2C_CH_SlaveTransmit((XMC_USIC_CH_t*)obj_s->i2c, data[i]);
+	}
+
+	return 1;
+}
+
+#endif
 
 #if DEVICE_I2C_ASYNCH
 
@@ -360,11 +431,13 @@ uint32_t i2c_irq_handler_asynch(i2c_t *obj)
 	if (flag & XMC_I2C_CH_STATUS_FLAG_NACK_RECEIVED)
 	{
 		event = I2C_EVENT_ERROR_NO_SLAVE;
+		XMC_I2C_CH_ClearStatusFlag((XMC_USIC_CH_t*)obj_s->i2c, XMC_I2C_CH_STATUS_FLAG_NACK_RECEIVED);
 		i2c_abort_asynch(obj);
 	}
 	else if (flag & XMC_I2C_CH_STATUS_FLAG_ERROR)
 	{
 		event = I2C_EVENT_ERROR;
+		XMC_I2C_CH_ClearStatusFlag((XMC_USIC_CH_t*)obj_s->i2c, XMC_I2C_CH_STATUS_FLAG_ERROR);
 		i2c_abort_asynch(obj);
 	}
 	else
@@ -475,7 +548,7 @@ uint32_t i2c_irq_handler_asynch(i2c_t *obj)
 		}
 	}
 
-	return (event & obj_s->available_events);;
+	return (event & obj_s->available_events);
 }
 
 uint8_t i2c_active(i2c_t *obj)
