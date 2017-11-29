@@ -163,6 +163,9 @@ typedef enum {
 	BUTTON1 = p1_14,
 	BUTTON2 = p1_15,
 
+	USBTX 	= (int)0x1FFFFFFF,
+	USBRX	= (int)0x2FFFFFFF,
+
     // Not connected
     NC = (int)0xFFFFFFFF
 } PinName;

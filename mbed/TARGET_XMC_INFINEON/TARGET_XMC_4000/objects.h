@@ -39,6 +39,7 @@ struct serial_s {
     uint32_t stopbits;
     uint32_t parity;
     uint8_t channel;
+    uint8_t usb;
 #if DEVICE_SERIAL_ASYNCH
     uint32_t events;
     uint8_t tx_busy;

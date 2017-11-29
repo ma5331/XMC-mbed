@@ -553,30 +553,58 @@
 //	}
 //}
 
-InterruptIn rise(p2_6);
-InterruptIn fall(p2_1);
-DigitalOut led(LED1);
-DigitalOut led2(LED2);
+//InterruptIn rise(p2_6);
+//InterruptIn fall(p2_1);
+//DigitalOut led(LED1);
+//DigitalOut led2(LED2);
+//
+//DigitalIn test(p0_1, PullUp);
+//
+//void rising() {
+//	led2 = 1;
+//}
+//
+//void falling() {
+//	led2=0;
+//}
+//int main() {
+//
+//	rise.mode(PullUp);
+//	fall.mode(PullUp);
+//
+//	rise.rise(&rising);
+//	fall.fall(&falling);
+//
+//	while (1) {
+//		led = !led;
+//		wait(0.25);
+//	}
+//}
 
-DigitalIn test(p0_1, PullUp);
 
-void rising() {
-	led2 = 1;
+Serial pc(USBTX, USBRX);
+
+void callback_rx(int events)
+{
+	static int pos = 0;
+
+	pos++;
 }
 
-void falling() {
-	led2=0;
-}
-int main() {
+event_callback_t functionpointer;
 
-	rise.mode(PullUp);
-	fall.mode(PullUp);
+int main()
+{
+	char buffer[] = "Hello World!";
 
-	rise.rise(&rising);
-	fall.fall(&falling);
+	functionpointer=callback_rx;
 
-	while (1) {
-		led = !led;
-		wait(0.25);
+	while (1)
+	{
+		if (pc.readable())
+		{
+			pc.getc();
+			pc.write((uint8_t*)buffer, 12, functionpointer);
+		}
 	}
 }

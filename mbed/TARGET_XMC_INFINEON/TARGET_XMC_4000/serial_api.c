@@ -8,8 +8,12 @@
 #include "gpio_api.h"
 #include "xmc_uart.h"
 #include "xmc_gpio.h"
+#include "VirtualSerial.h"
 
-#define UART_NUM (6)
+
+#define UART_NUM (7)
+
+#define USB_UART_NUM 6
 
 #define FIFO_BUFFER_SIZE 16
 
@@ -20,15 +24,23 @@ static uart_irq_handler irq_handler;
 int stdio_uart_inited = 0;
 serial_t stdio_uart;
 
+int usb_irq_enabled = 0;
+int usb_transmitt = 0;
+
 #if DEVICE_SERIAL_ASYNCH
     #define SERIAL_S(obj) (&((obj)->serial))
 #else
     #define SERIAL_S(obj) (obj)
 #endif
 
+static void usb_irq (uint8_t ep_addr, XMC_USBD_EP_EVENT_t ep_event);
+
 void serial_update_parameter(serial_t *obj)
 {
 	struct serial_s *obj_s = SERIAL_S(obj);
+
+	if (obj_s->usb)
+		return;
 
 	gpio_t tx;
 	gpio_init_port(&tx, obj_s->tx_pin);
@@ -52,107 +64,122 @@ void serial_update_parameter(serial_t *obj)
 	XMC_UART_CH_Start((XMC_USIC_CH_t*)obj_s->uart);
 
 	XMC_GPIO_SetMode(tx.port, tx.pin, XMC_GPIO_MODE_OUTPUT_PUSH_PULL |
-			                          (pinmap_function(obj_s->tx_pin, PinMap_UART_TX) & 0x0F) << PORT0_IOCR0_PC0_Pos);
+									  (pinmap_function(obj_s->tx_pin, PinMap_UART_TX) & 0x0F) << PORT0_IOCR0_PC0_Pos);
 }
 
 void serial_init(serial_t *obj, PinName tx, PinName rx)
 {
 	struct serial_s *obj_s = SERIAL_S(obj);
 
-	UARTName uart_tx = (UARTName)pinmap_find_peripheral(tx, PinMap_UART_TX);
-	UARTName uart_rx = (UARTName)pinmap_find_peripheral(rx, PinMap_UART_RX);
+	if (tx == USBTX || rx == USBRX)
+		obj_s->usb = 1;
+	else
+		obj_s->usb = 0;
 
-	obj_s->uart = (UARTName)pinmap_merge(uart_tx, uart_rx);
-	MBED_ASSERT(obj_s->uart != (UARTName)NC);
-
-	obj_s->rx_pin = rx;
-	obj_s->tx_pin = tx;
-
-	obj_s->baudrate = 9600;
-	obj_s->databits = 8U;
-	obj_s->stopbits = 1U;
-	obj_s->parity = XMC_USIC_CH_PARITY_MODE_NONE;
-
-	switch (obj_s->uart)
+	if (obj_s->usb)
 	{
-		case UART_1:
-			obj_s->index = 0;
-			break;
-		case UART_2:
-			obj_s->index = 1;
-			break;
-		case UART_3:
-			obj_s->index = 2;
-			break;
-		case UART_4:
-			obj_s->index = 3;
-			break;
-		case UART_5:
-			obj_s->index = 4;
-			break;
-		case UART_6:
-			obj_s->index = 5;
-			break;
+		USB_runtime.cb_endpoint_event = usb_irq;
+		USB_Init();
+		obj_s->uart = (UARTName)&VirtualSerial_CDC_Interface;
+		obj_s->index = USB_UART_NUM;
 	}
-
-	uint8_t rx_function = pinmap_function(obj_s->rx_pin, PinMap_UART_RX);
-	uint8_t tx_function = pinmap_function(obj_s->tx_pin, PinMap_UART_TX);
-
-	// Init Rx-Pin
-	XMC_GPIO_CONFIG_t rx_pin_config =
+	else
 	{
-		.mode 			= XMC_GPIO_MODE_INPUT_TRISTATE,
-		.output_level 	= XMC_GPIO_OUTPUT_LEVEL_HIGH,
-	};
+		UARTName uart_tx = (UARTName)pinmap_find_peripheral(tx, PinMap_UART_TX);
+		UARTName uart_rx = (UARTName)pinmap_find_peripheral(rx, PinMap_UART_RX);
 
-	gpio_t rx_gpio;
-	gpio_init_port(&rx_gpio, obj_s->rx_pin);
+		obj_s->uart = (UARTName)pinmap_merge(uart_tx, uart_rx);
+		MBED_ASSERT(obj_s->uart != (UARTName)NC);
 
-	XMC_GPIO_Init(rx_gpio.port, rx_gpio.pin, &rx_pin_config);
+		obj_s->rx_pin = rx;
+		obj_s->tx_pin = tx;
 
-	// Init USIC channel
-	XMC_UART_CH_CONFIG_t uart_config =
-	{
-		.baudrate      = obj_s->baudrate,
-		.data_bits     = obj_s->databits,
-		.frame_length  = obj_s->databits,
-		.stop_bits     = obj_s->stopbits,
-		.oversampling  = 16U,
-		.parity_mode   = obj_s->parity,
-	};
-	XMC_UART_CH_Init((XMC_USIC_CH_t*)obj_s->uart, &uart_config);
+		obj_s->baudrate = 9600;
+		obj_s->databits = 8U;
+		obj_s->stopbits = 1U;
+		obj_s->parity = XMC_USIC_CH_PARITY_MODE_NONE;
 
-	// Input source path
-	uint8_t source = rx_function & 0x0F;
-	XMC_USIC_CH_SetInputSource((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_INPUT_DX0, source);
+		switch (obj_s->uart)
+		{
+			case UART_1:
+				obj_s->index = 0;
+				break;
+			case UART_2:
+				obj_s->index = 1;
+				break;
+			case UART_3:
+				obj_s->index = 2;
+				break;
+			case UART_4:
+				obj_s->index = 3;
+				break;
+			case UART_5:
+				obj_s->index = 4;
+				break;
+			case UART_6:
+				obj_s->index = 5;
+				break;
+		}
 
-	// Configuration FIFO
-	obj_s->channel = (rx_function & 0xF0) >> 4;
-	XMC_USIC_CH_TXFIFO_Configure((XMC_USIC_CH_t*)obj_s->uart, 0 + (32 * obj_s->channel), XMC_USIC_CH_FIFO_SIZE_16WORDS, 1);
-	XMC_USIC_CH_RXFIFO_Configure((XMC_USIC_CH_t*)obj_s->uart, 16 + (32 * obj_s->channel), XMC_USIC_CH_FIFO_SIZE_16WORDS, 0);
+		uint8_t rx_function = pinmap_function(obj_s->rx_pin, PinMap_UART_RX);
+		uint8_t tx_function = pinmap_function(obj_s->tx_pin, PinMap_UART_TX);
 
-	XMC_USIC_CH_TXFIFO_SetInterruptNodePointer((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_TXFIFO_INTERRUPT_NODE_POINTER_STANDARD, 0 + (2*obj_s->channel));
-	XMC_USIC_CH_RXFIFO_SetInterruptNodePointer((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_RXFIFO_INTERRUPT_NODE_POINTER_STANDARD, 1 + (2*obj_s->channel));
-	XMC_USIC_CH_RXFIFO_SetInterruptNodePointer((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_RXFIFO_INTERRUPT_NODE_POINTER_ALTERNATE, 1 + (2*obj_s->channel));
+		// Init Rx-Pin
+		XMC_GPIO_CONFIG_t rx_pin_config =
+		{
+			.mode 			= XMC_GPIO_MODE_INPUT_TRISTATE,
+			.output_level 	= XMC_GPIO_OUTPUT_LEVEL_HIGH,
+		};
 
-	XMC_UART_CH_Start((XMC_USIC_CH_t*)obj_s->uart);
+		gpio_t rx_gpio;
+		gpio_init_port(&rx_gpio, obj_s->rx_pin);
 
-	//Init Tx-Pin
-	XMC_GPIO_CONFIG_t tx_pin_config =
-	{
-		.mode			= XMC_GPIO_MODE_OUTPUT_PUSH_PULL | ((tx_function & 0x0F) << PORT0_IOCR0_PC0_Pos),
-		.output_level	= XMC_GPIO_OUTPUT_LEVEL_HIGH,
-	};
+		XMC_GPIO_Init(rx_gpio.port, rx_gpio.pin, &rx_pin_config);
 
-	gpio_t tx_gpio;
-	gpio_init_port(&tx_gpio, obj_s->tx_pin);
+		// Init USIC channel
+		XMC_UART_CH_CONFIG_t uart_config =
+		{
+			.baudrate      = obj_s->baudrate,
+			.data_bits     = obj_s->databits,
+			.frame_length  = obj_s->databits,
+			.stop_bits     = obj_s->stopbits,
+			.oversampling  = 16U,
+			.parity_mode   = obj_s->parity,
+		};
+		XMC_UART_CH_Init((XMC_USIC_CH_t*)obj_s->uart, &uart_config);
 
-	XMC_GPIO_Init(tx_gpio.port, tx_gpio.pin, &tx_pin_config);
+		// Input source path
+		uint8_t source = rx_function & 0x0F;
+		XMC_USIC_CH_SetInputSource((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_INPUT_DX0, source);
 
-	if (obj_s->uart == STDIO_UART)
-	{
-		stdio_uart_inited = 1;
-		memcpy(&stdio_uart, obj, sizeof(serial_t));
+		// Configuration FIFO
+		obj_s->channel = (rx_function & 0xF0) >> 4;
+		XMC_USIC_CH_TXFIFO_Configure((XMC_USIC_CH_t*)obj_s->uart, 0 + (32 * obj_s->channel), XMC_USIC_CH_FIFO_SIZE_16WORDS, 1);
+		XMC_USIC_CH_RXFIFO_Configure((XMC_USIC_CH_t*)obj_s->uart, 16 + (32 * obj_s->channel), XMC_USIC_CH_FIFO_SIZE_16WORDS, 0);
+
+		XMC_USIC_CH_TXFIFO_SetInterruptNodePointer((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_TXFIFO_INTERRUPT_NODE_POINTER_STANDARD, 0 + (2*obj_s->channel));
+		XMC_USIC_CH_RXFIFO_SetInterruptNodePointer((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_RXFIFO_INTERRUPT_NODE_POINTER_STANDARD, 1 + (2*obj_s->channel));
+		XMC_USIC_CH_RXFIFO_SetInterruptNodePointer((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_RXFIFO_INTERRUPT_NODE_POINTER_ALTERNATE, 1 + (2*obj_s->channel));
+
+		XMC_UART_CH_Start((XMC_USIC_CH_t*)obj_s->uart);
+
+		//Init Tx-Pin
+		XMC_GPIO_CONFIG_t tx_pin_config =
+		{
+			.mode			= XMC_GPIO_MODE_OUTPUT_PUSH_PULL | ((tx_function & 0x0F) << PORT0_IOCR0_PC0_Pos),
+			.output_level	= XMC_GPIO_OUTPUT_LEVEL_HIGH,
+		};
+
+		gpio_t tx_gpio;
+		gpio_init_port(&tx_gpio, obj_s->tx_pin);
+
+		XMC_GPIO_Init(tx_gpio.port, tx_gpio.pin, &tx_pin_config);
+
+		if (obj_s->uart == STDIO_UART)
+		{
+			stdio_uart_inited = 1;
+			memcpy(&stdio_uart, obj, sizeof(serial_t));
+		}
 	}
 }
 
@@ -160,23 +187,46 @@ void serial_putc(serial_t *obj, int c)
 {
 	struct serial_s *obj_s = SERIAL_S(obj);
 
-	while (XMC_USIC_CH_TXFIFO_IsFull((XMC_USIC_CH_t*)obj_s->uart));
+	if (obj_s->usb)
+	{
+		if (usb_irq_enabled)
+			usb_transmitt = 1;
+		CDC_Device_SendByte(&VirtualSerial_CDC_Interface, c);
+		CDC_Device_Flush(&VirtualSerial_CDC_Interface);
+		while(!Endpoint_IsINReady());
+	}
+	else
+	{
+		while (XMC_USIC_CH_TXFIFO_IsFull((XMC_USIC_CH_t*)obj_s->uart));
 
-	XMC_UART_CH_Transmit((XMC_USIC_CH_t*)obj_s->uart, c);
+		XMC_UART_CH_Transmit((XMC_USIC_CH_t*)obj_s->uart, c);
+	}
 }
 
 int serial_getc(serial_t *obj)
 {
 	struct serial_s *obj_s = SERIAL_S(obj);
 
-	while (!XMC_USIC_CH_RXFIFO_GetLevel((XMC_USIC_CH_t*)obj_s->uart));
+	if (obj_s->usb)
+	{
+		while (!CDC_Device_BytesReceived(&VirtualSerial_CDC_Interface));
 
-	return XMC_UART_CH_GetReceivedData((XMC_USIC_CH_t*)obj_s->uart);
+		return CDC_Device_ReceiveByte(&VirtualSerial_CDC_Interface);
+	}
+	else
+	{
+		while (!XMC_USIC_CH_RXFIFO_GetLevel((XMC_USIC_CH_t*)obj_s->uart));
+
+		return XMC_UART_CH_GetReceivedData((XMC_USIC_CH_t*)obj_s->uart);
+	}
 }
 
 void serial_baud(serial_t *obj, int baudrate)
 {
 	struct serial_s *obj_s = SERIAL_S(obj);
+
+	if (obj_s->usb)
+		return;
 
 	obj_s->baudrate = baudrate;
 	serial_update_parameter(obj);
@@ -185,6 +235,9 @@ void serial_baud(serial_t *obj, int baudrate)
 void serial_format(serial_t *obj, int data_bits, SerialParity parity, int stop_bits)
 {
 	struct serial_s *obj_s = SERIAL_S(obj);
+
+	if (obj_s->usb)
+		return;
 
 	obj_s->databits = data_bits;
 	obj_s->stopbits = stop_bits;
@@ -209,7 +262,12 @@ int serial_readable(serial_t *obj)
 {
 	struct serial_s *obj_s = SERIAL_S(obj);
 
-	uint8_t level = XMC_USIC_CH_RXFIFO_GetLevel((XMC_USIC_CH_t*)obj_s->uart);
+	uint8_t level;
+
+	if (obj_s->usb)
+		level = CDC_Device_BytesReceived(&VirtualSerial_CDC_Interface);
+	else
+		level = XMC_USIC_CH_RXFIFO_GetLevel((XMC_USIC_CH_t*)obj_s->uart);
 
 	if (level)
 		return 1;
@@ -221,6 +279,9 @@ int serial_writable(serial_t *obj)
 {
 	struct serial_s *obj_s = SERIAL_S(obj);
 
+	if (obj_s->usb)
+		return 1;
+
 	if (XMC_USIC_CH_TXFIFO_IsFull((XMC_USIC_CH_t*)obj_s->uart))
 		return 0;
 	else
@@ -230,6 +291,9 @@ int serial_writable(serial_t *obj)
 void serial_break_set(serial_t *obj)
 {
 	struct serial_s *obj_s = SERIAL_S(obj);
+
+	if (obj_s->usb)
+		return;
 
 	/* Check FIFO size */
 	if ((((XMC_USIC_CH_t*)obj_s->uart)->TBCTR & USIC_CH_TBCTR_SIZE_Msk) == 0)
@@ -331,6 +395,32 @@ static void uart6_tx_irq()
 	uart_tx_irq((XMC_USIC_CH_t*)USIC2_CH1, 5);
 }
 
+static void usb_irq (uint8_t ep_addr, XMC_USBD_EP_EVENT_t ep_event)
+{
+	USBD_SignalEndpointEvent_Handler(ep_addr, ep_event);
+
+	if (usb_irq_enabled)
+	{
+		USBD_Endpoint_t *ep =  &device.Endpoints[ep_addr & ENDPOINT_EPNUM_MASK];
+
+		switch (ep_event)
+		{
+			case XMC_USBD_EP_EVENT_OUT:
+				if (ep->OutBytesAvailable)
+					irq_handler(serial_irq_ids[USB_UART_NUM], RxIrq);
+				break;
+			case XMC_USBD_EP_EVENT_IN:
+				if (!ep->InBytesAvailable && usb_transmitt)
+				{
+					irq_handler(serial_irq_ids[USB_UART_NUM], TxIrq);
+					usb_transmitt = 0;
+				}
+			default:
+				break;
+		}
+	}
+}
+
 void serial_irq_set(serial_t *obj, SerialIrq irq, uint32_t enable)
 {
 	struct serial_s *obj_s = SERIAL_S(obj);
@@ -338,40 +428,45 @@ void serial_irq_set(serial_t *obj, SerialIrq irq, uint32_t enable)
 	IRQn_Type irq_n = (IRQn_Type)0;
 	uint32_t vector = 0;
 
-	switch (obj_s->uart)
-	{
-		case UART_1: if (irq == TxIrq) {irq_n = USIC0_0_IRQn; vector = (uint32_t)&uart1_tx_irq;}
-		             else              {irq_n = USIC0_1_IRQn; vector = (uint32_t)&uart1_rx_irq;} break;
-		case UART_2: if (irq == TxIrq) {irq_n = USIC0_2_IRQn; vector = (uint32_t)&uart2_tx_irq;}
-		             else              {irq_n = USIC0_3_IRQn; vector = (uint32_t)&uart2_rx_irq;} break;
-		case UART_3: if (irq == TxIrq) {irq_n = USIC1_0_IRQn; vector = (uint32_t)&uart3_tx_irq;}
-		             else              {irq_n = USIC1_1_IRQn; vector = (uint32_t)&uart3_rx_irq;} break;
-		case UART_4: if (irq == TxIrq) {irq_n = USIC1_2_IRQn; vector = (uint32_t)&uart4_tx_irq;}
-		             else              {irq_n = USIC1_3_IRQn; vector = (uint32_t)&uart4_rx_irq;} break;
-		case UART_5: if (irq == TxIrq) {irq_n = USIC2_0_IRQn; vector = (uint32_t)&uart5_tx_irq;}
-		             else              {irq_n = USIC2_1_IRQn; vector = (uint32_t)&uart5_rx_irq;} break;
-		case UART_6: if (irq == TxIrq) {irq_n = USIC2_2_IRQn; vector = (uint32_t)&uart6_tx_irq;}
-		             else              {irq_n = USIC2_3_IRQn; vector = (uint32_t)&uart6_rx_irq;} break;
-	}
-
-	if (enable)
-	{
-		if (irq == TxIrq)
-			XMC_USIC_CH_TXFIFO_EnableEvent((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_TXFIFO_EVENT_CONF_STANDARD);
-		else
-			XMC_USIC_CH_RXFIFO_EnableEvent((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_RXFIFO_EVENT_CONF_STANDARD | XMC_USIC_CH_RXFIFO_EVENT_CONF_ALTERNATE);
-
-		NVIC_SetVector(irq_n, vector);
-		NVIC_EnableIRQ(irq_n);
-	}
+	if (obj_s->usb)
+		usb_irq_enabled = enable;
 	else
 	{
-		if (irq == TxIrq)
-			XMC_USIC_CH_TXFIFO_DisableEvent((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_TXFIFO_EVENT_CONF_STANDARD);
-		else
-			XMC_USIC_CH_RXFIFO_DisableEvent((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_RXFIFO_EVENT_CONF_STANDARD | XMC_USIC_CH_RXFIFO_EVENT_CONF_ALTERNATE);
+		switch (obj_s->uart)
+		{
+			case UART_1: if (irq == TxIrq) {irq_n = USIC0_0_IRQn; vector = (uint32_t)&uart1_tx_irq;}
+						 else              {irq_n = USIC0_1_IRQn; vector = (uint32_t)&uart1_rx_irq;} break;
+			case UART_2: if (irq == TxIrq) {irq_n = USIC0_2_IRQn; vector = (uint32_t)&uart2_tx_irq;}
+						 else              {irq_n = USIC0_3_IRQn; vector = (uint32_t)&uart2_rx_irq;} break;
+			case UART_3: if (irq == TxIrq) {irq_n = USIC1_0_IRQn; vector = (uint32_t)&uart3_tx_irq;}
+						 else              {irq_n = USIC1_1_IRQn; vector = (uint32_t)&uart3_rx_irq;} break;
+			case UART_4: if (irq == TxIrq) {irq_n = USIC1_2_IRQn; vector = (uint32_t)&uart4_tx_irq;}
+						 else              {irq_n = USIC1_3_IRQn; vector = (uint32_t)&uart4_rx_irq;} break;
+			case UART_5: if (irq == TxIrq) {irq_n = USIC2_0_IRQn; vector = (uint32_t)&uart5_tx_irq;}
+						 else              {irq_n = USIC2_1_IRQn; vector = (uint32_t)&uart5_rx_irq;} break;
+			case UART_6: if (irq == TxIrq) {irq_n = USIC2_2_IRQn; vector = (uint32_t)&uart6_tx_irq;}
+						 else              {irq_n = USIC2_3_IRQn; vector = (uint32_t)&uart6_rx_irq;} break;
+		}
 
-		NVIC_DisableIRQ(irq_n);
+		if (enable)
+		{
+			if (irq == TxIrq)
+				XMC_USIC_CH_TXFIFO_EnableEvent((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_TXFIFO_EVENT_CONF_STANDARD);
+			else
+				XMC_USIC_CH_RXFIFO_EnableEvent((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_RXFIFO_EVENT_CONF_STANDARD | XMC_USIC_CH_RXFIFO_EVENT_CONF_ALTERNATE);
+
+			NVIC_SetVector(irq_n, vector);
+			NVIC_EnableIRQ(irq_n);
+		}
+		else
+		{
+			if (irq == TxIrq)
+				XMC_USIC_CH_TXFIFO_DisableEvent((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_TXFIFO_EVENT_CONF_STANDARD);
+			else
+				XMC_USIC_CH_RXFIFO_DisableEvent((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_RXFIFO_EVENT_CONF_STANDARD | XMC_USIC_CH_RXFIFO_EVENT_CONF_ALTERNATE);
+
+			NVIC_DisableIRQ(irq_n);
+		}
 	}
 }
 
@@ -474,6 +569,9 @@ static IRQn_Type serial_get_tx_irq_n(serial_t *obj)
         case 5:
             irq_n = USIC2_2_IRQn;
             break;
+        case USB_UART_NUM:
+        	irq_n = USB0_0_IRQn;
+        	break;
         default:
             irq_n = (IRQn_Type)0;
     }
@@ -554,19 +652,28 @@ int serial_tx_asynch(serial_t *obj, const void *tx, size_t tx_length, uint8_t tx
     serial_enable_event(obj, SERIAL_EVENT_TX_ALL, 0); // Clear all events
     serial_enable_event(obj, event, 1); // Set only the wanted events
 
-    // Enable interrupt
-    IRQn_Type irq_n = serial_get_tx_irq_n(obj);
-    NVIC_ClearPendingIRQ(irq_n);
-    NVIC_DisableIRQ(irq_n);
-    NVIC_SetVector(irq_n, (uint32_t)handler);
-    NVIC_EnableIRQ(irq_n);
+	// Enable interrupt
+	IRQn_Type irq_n = serial_get_tx_irq_n(obj);
+	NVIC_ClearPendingIRQ(irq_n);
+	NVIC_DisableIRQ(irq_n);
+	NVIC_SetVector(irq_n, (uint32_t)handler);
+	NVIC_EnableIRQ(irq_n);
 
-    obj_s->tx_busy = 1;
+	obj_s->tx_busy = 1;
 
-    XMC_USIC_CH_TXFIFO_Flush((XMC_USIC_CH_t*)obj_s->uart);
+    if (obj_s->usb)
+    {
+    	obj->tx_buff.pos+=tx_length;
+    	CDC_Device_SendData(&VirtualSerial_CDC_Interface, tx, tx_length);
+		CDC_Device_Flush(&VirtualSerial_CDC_Interface);
+    }
+    else
+    {
+		XMC_USIC_CH_TXFIFO_Flush((XMC_USIC_CH_t*)obj_s->uart);
 
-    XMC_USIC_CH_TXFIFO_EnableEvent((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_TXFIFO_EVENT_CONF_STANDARD);
-    XMC_USIC_CH_TriggerServiceRequest((XMC_USIC_CH_t*)obj_s->uart, 0 + (2*obj_s->channel));
+		XMC_USIC_CH_TXFIFO_EnableEvent((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_TXFIFO_EVENT_CONF_STANDARD);
+		XMC_USIC_CH_TriggerServiceRequest((XMC_USIC_CH_t*)obj_s->uart, 0 + (2*obj_s->channel));
+    }
 
     return tx_length;
 }
@@ -666,107 +773,115 @@ int serial_irq_handler_asynch(serial_t *obj)
     struct serial_s *obj_s = SERIAL_S(obj);
     volatile int return_event = 0;
 
-    // TX PART:
-	if (obj_s->tx_busy)
-	{
-		if (obj->tx_buff.pos == obj->tx_buff.length)
+    //Virtual USB
+    if (obj_s->usb)
+    {
+    	XMC_USBD_IRQHandler(&USB_runtime);
+    }
+    else //UART
+    {
+		// TX PART:
+		if (obj_s->tx_busy)
 		{
-			XMC_USIC_CH_TXFIFO_DisableEvent((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_TXFIFO_EVENT_CONF_STANDARD);
-			obj_s->tx_busy = 0;
+			if (obj->tx_buff.pos == obj->tx_buff.length)
+			{
+				XMC_USIC_CH_TXFIFO_DisableEvent((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_TXFIFO_EVENT_CONF_STANDARD);
+				obj_s->tx_busy = 0;
 
-			if ((obj_s->events & SERIAL_EVENT_TX_COMPLETE ) != 0)
-				return_event |= (SERIAL_EVENT_TX_COMPLETE & obj_s->events);
+				if ((obj_s->events & SERIAL_EVENT_TX_COMPLETE ) != 0)
+					return_event |= (SERIAL_EVENT_TX_COMPLETE & obj_s->events);
+			}
+
+			while (!XMC_USIC_CH_TXFIFO_IsFull((XMC_USIC_CH_t*)obj_s->uart) &&
+					obj->tx_buff.pos < obj->tx_buff.length)
+			{
+				if (obj->tx_buff.width == 16)
+				{
+					XMC_UART_CH_Transmit((XMC_USIC_CH_t*)obj_s->uart, ((uint8_t*)obj->tx_buff.buffer)[2*obj->tx_buff.pos+1]);
+					XMC_UART_CH_Transmit((XMC_USIC_CH_t*)obj_s->uart, ((uint8_t*)obj->tx_buff.buffer)[2*obj->tx_buff.pos]);
+					obj->tx_buff.pos++;
+				}
+				else
+					XMC_UART_CH_Transmit((XMC_USIC_CH_t*)obj_s->uart, ((uint8_t*)obj->tx_buff.buffer)[obj->tx_buff.pos++]);
+			}
+
+			XMC_USIC_CH_TXFIFO_ClearEvent((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_TXFIFO_EVENT_STANDARD);
 		}
 
-		while (!XMC_USIC_CH_TXFIFO_IsFull((XMC_USIC_CH_t*)obj_s->uart) &&
-				obj->tx_buff.pos < obj->tx_buff.length)
+		//RX PART
+		if (obj_s->rx_busy)
 		{
-			if (obj->tx_buff.width == 16)
+			while (!XMC_USIC_CH_RXFIFO_IsEmpty((XMC_USIC_CH_t*)obj_s->uart))
 			{
-				XMC_UART_CH_Transmit((XMC_USIC_CH_t*)obj_s->uart, ((uint8_t*)obj->tx_buff.buffer)[2*obj->tx_buff.pos+1]);
-				XMC_UART_CH_Transmit((XMC_USIC_CH_t*)obj_s->uart, ((uint8_t*)obj->tx_buff.buffer)[2*obj->tx_buff.pos]);
-				obj->tx_buff.pos++;
+				if (obj->rx_buff.width == 16)
+				{
+					uint8_t msbs = XMC_UART_CH_GetReceivedData((XMC_USIC_CH_t*)obj_s->uart);
+					uint8_t lsbs = XMC_UART_CH_GetReceivedData((XMC_USIC_CH_t*)obj_s->uart);
+
+					if (obj->rx_buff.pos < obj->rx_buff.length)
+						((uint16_t*)obj->rx_buff.buffer)[obj->rx_buff.pos++] = (msbs << 8) | lsbs;
+				}
+				else
+				{
+					uint8_t rec = XMC_UART_CH_GetReceivedData((XMC_USIC_CH_t*)obj_s->uart);
+
+					if (obj->rx_buff.pos < obj->rx_buff.length)
+						((uint8_t*)obj->rx_buff.buffer)[obj->rx_buff.pos++] = rec;
+				}
+			}
+
+			if (obj->rx_buff.pos == obj->rx_buff.length)
+			{
+				XMC_USIC_CH_RXFIFO_DisableEvent((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_RXFIFO_EVENT_CONF_STANDARD | XMC_USIC_CH_RXFIFO_EVENT_CONF_ALTERNATE);
+				obj_s->rx_busy = 0;
+
+				return_event |= (SERIAL_EVENT_RX_COMPLETE & obj_s->events);
 			}
 			else
-				XMC_UART_CH_Transmit((XMC_USIC_CH_t*)obj_s->uart, ((uint8_t*)obj->tx_buff.buffer)[obj->tx_buff.pos++]);
-		}
-
-		XMC_USIC_CH_TXFIFO_ClearEvent((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_TXFIFO_EVENT_STANDARD);
-	}
-
-	//RX PART
-	if (obj_s->rx_busy)
-	{
-		while (!XMC_USIC_CH_RXFIFO_IsEmpty((XMC_USIC_CH_t*)obj_s->uart))
-		{
-			if (obj->rx_buff.width == 16)
 			{
-				uint8_t msbs = XMC_UART_CH_GetReceivedData((XMC_USIC_CH_t*)obj_s->uart);
-				uint8_t lsbs = XMC_UART_CH_GetReceivedData((XMC_USIC_CH_t*)obj_s->uart);
-
-				if (obj->rx_buff.pos < obj->rx_buff.length)
-					((uint16_t*)obj->rx_buff.buffer)[obj->rx_buff.pos++] = (msbs << 8) | lsbs;
-			}
-			else
-			{
-				uint8_t rec = XMC_UART_CH_GetReceivedData((XMC_USIC_CH_t*)obj_s->uart);
-
-				if (obj->rx_buff.pos < obj->rx_buff.length)
-					((uint8_t*)obj->rx_buff.buffer)[obj->rx_buff.pos++] = rec;
-			}
-		}
-
-		if (obj->rx_buff.pos == obj->rx_buff.length)
-		{
-			XMC_USIC_CH_RXFIFO_DisableEvent((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_RXFIFO_EVENT_CONF_STANDARD | XMC_USIC_CH_RXFIFO_EVENT_CONF_ALTERNATE);
-			obj_s->rx_busy = 0;
-
-			return_event |= (SERIAL_EVENT_RX_COMPLETE & obj_s->events);
-		}
-		else
-		{
-			uint16_t level = obj->rx_buff.length - obj->rx_buff.pos;
-
-			if (obj->rx_buff.width == 16)
-				level = level << 1;
-
-			if (level > FIFO_BUFFER_SIZE)
-				XMC_USIC_CH_RXFIFO_SetSizeTriggerLimit((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_FIFO_SIZE_16WORDS, FIFO_BUFFER_SIZE-1);
-			else
-				XMC_USIC_CH_RXFIFO_SetSizeTriggerLimit((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_FIFO_SIZE_16WORDS, level-1);
-		}
-
-		//Check if char_match is present
-		if (obj_s->events & SERIAL_EVENT_RX_CHARACTER_MATCH)
-		{
-			uint8_t *buf = (uint8_t*)(obj->rx_buff.buffer);
-
-			if (buf != NULL)
-			{
-				uint8_t length;
+				uint16_t level = obj->rx_buff.length - obj->rx_buff.pos;
 
 				if (obj->rx_buff.width == 16)
-					length = obj->rx_buff.pos << 1;
-				else
-					length = obj->rx_buff.pos;
+					level = level << 1;
 
-				for (uint8_t i = 0; i < length; i++) {
-					if (buf[i] == obj->char_match)
-					{
-						if (obj->rx_buff.width == 16)
-							obj->rx_buff.pos = i>>1;
-						else
-							obj->rx_buff.pos = i;
-						return_event |= (SERIAL_EVENT_RX_CHARACTER_MATCH & obj_s->events);
-						serial_rx_abort_asynch(obj);
-						break;
+				if (level > FIFO_BUFFER_SIZE)
+					XMC_USIC_CH_RXFIFO_SetSizeTriggerLimit((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_FIFO_SIZE_16WORDS, FIFO_BUFFER_SIZE-1);
+				else
+					XMC_USIC_CH_RXFIFO_SetSizeTriggerLimit((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_FIFO_SIZE_16WORDS, level-1);
+			}
+
+			//Check if char_match is present
+			if (obj_s->events & SERIAL_EVENT_RX_CHARACTER_MATCH)
+			{
+				uint8_t *buf = (uint8_t*)(obj->rx_buff.buffer);
+
+				if (buf != NULL)
+				{
+					uint8_t length;
+
+					if (obj->rx_buff.width == 16)
+						length = obj->rx_buff.pos << 1;
+					else
+						length = obj->rx_buff.pos;
+
+					for (uint8_t i = 0; i < length; i++) {
+						if (buf[i] == obj->char_match)
+						{
+							if (obj->rx_buff.width == 16)
+								obj->rx_buff.pos = i>>1;
+							else
+								obj->rx_buff.pos = i;
+							return_event |= (SERIAL_EVENT_RX_CHARACTER_MATCH & obj_s->events);
+							serial_rx_abort_asynch(obj);
+							break;
+						}
 					}
 				}
 			}
-		}
 
-		XMC_USIC_CH_RXFIFO_ClearEvent((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_RXFIFO_EVENT_STANDARD | XMC_USIC_CH_RXFIFO_EVENT_ALTERNATE);
-	}
+			XMC_USIC_CH_RXFIFO_ClearEvent((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_RXFIFO_EVENT_STANDARD | XMC_USIC_CH_RXFIFO_EVENT_ALTERNATE);
+		}
+    }
 
     return return_event;
 }
