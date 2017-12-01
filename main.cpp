@@ -13,16 +13,13 @@ event_callback_t functionpointer;
 
 int main()
 {
-	char buffer[] = "Hello World!";
+	char buffer[20] = {0};
 
 	functionpointer=callback_rx;
+	pc.read((uint16_t*)buffer, 10, functionpointer, SERIAL_EVENT_RX_CHARACTER_MATCH);
 
 	while (1)
 	{
-		if (pc.readable())
-		{
-			pc.getc();
-			pc.write((uint8_t*)buffer, 12, functionpointer);
-		}
+
 	}
 }

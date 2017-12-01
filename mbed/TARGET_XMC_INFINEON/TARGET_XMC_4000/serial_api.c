@@ -8,6 +8,7 @@
 #include "gpio_api.h"
 #include "xmc_uart.h"
 #include "xmc_gpio.h"
+#include "xmc_usbd.h"
 #include "VirtualSerial.h"
 
 
@@ -24,11 +25,14 @@ static uart_irq_handler irq_handler;
 int stdio_uart_inited = 0;
 serial_t stdio_uart;
 
+serial_t* usb_uart;
+
 int usb_irq_enabled = 0;
-int usb_transmitt = 0;
 
 #if DEVICE_SERIAL_ASYNCH
     #define SERIAL_S(obj) (&((obj)->serial))
+	int usb_irq_async = 0;
+	int usb_async_event = 0;
 #else
     #define SERIAL_S(obj) (obj)
 #endif
@@ -82,6 +86,7 @@ void serial_init(serial_t *obj, PinName tx, PinName rx)
 		USB_Init();
 		obj_s->uart = (UARTName)&VirtualSerial_CDC_Interface;
 		obj_s->index = USB_UART_NUM;
+		usb_uart = obj;
 	}
 	else
 	{
@@ -189,8 +194,6 @@ void serial_putc(serial_t *obj, int c)
 
 	if (obj_s->usb)
 	{
-		if (usb_irq_enabled)
-			usb_transmitt = 1;
 		CDC_Device_SendByte(&VirtualSerial_CDC_Interface, c);
 		CDC_Device_Flush(&VirtualSerial_CDC_Interface);
 		while(!Endpoint_IsINReady());
@@ -397,28 +400,94 @@ static void uart6_tx_irq()
 
 static void usb_irq (uint8_t ep_addr, XMC_USBD_EP_EVENT_t ep_event)
 {
+	XMC_USBD_EVENT_OUT_EP_t in_event;
+	XMC_USBD_EVENT_IN_EP_t out_event;
+
+	uint8_t ep_num = ep_addr & 0x0f;
+	XMC_USBD_EP_t* ep =  &xmc_device.ep[ep_num];
+
 	USBD_SignalEndpointEvent_Handler(ep_addr, ep_event);
 
-	if (usb_irq_enabled)
+	if (usb_irq_enabled && ep_num)
 	{
-		USBD_Endpoint_t *ep =  &device.Endpoints[ep_addr & ENDPOINT_EPNUM_MASK];
-
 		switch (ep_event)
 		{
 			case XMC_USBD_EP_EVENT_OUT:
-				if (ep->OutBytesAvailable)
+				out_event = xmc_device.endpoint_out_register[ep_num]->doepint & xmc_device.device_register->doepmsk;
+				if (out_event & XMC_USBD_EVENT_IN_EP_TX_COMPLET)
 					irq_handler(serial_irq_ids[USB_UART_NUM], RxIrq);
 				break;
 			case XMC_USBD_EP_EVENT_IN:
-				if (!ep->InBytesAvailable && usb_transmitt)
-				{
+				in_event = xmc_device.endpoint_in_register[ep_num]->diepint &
+				       ((((xmc_device.device_register->dtknqr4_fifoemptymsk >> ep->address_u.address_st.number) & 0x1U) << 7U) | xmc_device.device_register->diepmsk);
+
+				if (in_event & XMC_USBD_EVENT_OUT_EP_TX_COMPLET)
 					irq_handler(serial_irq_ids[USB_UART_NUM], TxIrq);
-					usb_transmitt = 0;
-				}
+				break;
 			default:
 				break;
 		}
 	}
+
+# if DEVICE_SERIAL_ASYNCH
+
+	usb_async_event = 0;
+
+	if (usb_irq_async && ep_num)
+	{
+		switch (ep_event)
+		{
+			case XMC_USBD_EP_EVENT_OUT:
+				out_event = xmc_device.endpoint_out_register[ep_num]->doepint & xmc_device.device_register->doepmsk;
+				if (out_event & XMC_USBD_EVENT_IN_EP_TX_COMPLET)
+				{
+					uint8_t bytes = CDC_Device_BytesReceived(&VirtualSerial_CDC_Interface);
+
+					if (usb_uart->rx_buff.width == 16)
+					{
+						for (uint8_t i=0; i<bytes; i+=2)
+						{
+							uint8_t msbs = CDC_Device_ReceiveByte(&VirtualSerial_CDC_Interface);
+							uint8_t lsbs = CDC_Device_ReceiveByte(&VirtualSerial_CDC_Interface);
+
+							if (usb_uart->rx_buff.pos < usb_uart->rx_buff.length)
+								((uint16_t*)usb_uart->rx_buff.buffer)[usb_uart->rx_buff.pos++] = (msbs <<8) | lsbs;
+						}
+					}
+					else
+					{
+						for (uint8_t i=0; i<bytes; i++)
+						{
+							uint8_t rec = CDC_Device_ReceiveByte(&VirtualSerial_CDC_Interface);
+							if (usb_uart->rx_buff.pos < usb_uart->rx_buff.length)
+								((uint8_t*)usb_uart->rx_buff.buffer)[usb_uart->rx_buff.pos++] = rec;
+						}
+					}
+
+					if (usb_uart->rx_buff.pos == usb_uart->rx_buff.length)
+					{
+						usb_async_event = SERIAL_EVENT_RX_COMPLETE;
+						usb_uart->serial.rx_busy = 0;
+						usb_irq_async = 0;
+					}
+				}
+				break;
+			case XMC_USBD_EP_EVENT_IN:
+				in_event = xmc_device.endpoint_in_register[ep_num]->diepint &
+					   ((((xmc_device.device_register->dtknqr4_fifoemptymsk >> ep->address_u.address_st.number) & 0x1U) << 7U) | xmc_device.device_register->diepmsk);
+
+				if (in_event & XMC_USBD_EVENT_OUT_EP_TX_COMPLET)
+				{
+					usb_async_event = SERIAL_EVENT_TX_COMPLETE;
+			    	usb_uart->serial.tx_busy = 0;
+					usb_irq_async = 0;
+				}
+				break;
+			default:
+				break;
+		}
+	}
+#endif
 }
 
 void serial_irq_set(serial_t *obj, SerialIrq irq, uint32_t enable)
@@ -609,6 +678,9 @@ static IRQn_Type serial_get_rx_irq_n(serial_t *obj)
         case 5:
             irq_n = USIC2_3_IRQn;
             break;
+        case USB_UART_NUM:
+        	irq_n = USB0_0_IRQn;
+        	break;
         default:
             irq_n = (IRQn_Type)0;
     }
@@ -663,8 +735,12 @@ int serial_tx_asynch(serial_t *obj, const void *tx, size_t tx_length, uint8_t tx
 
     if (obj_s->usb)
     {
+    	usb_irq_async = 1;
     	obj->tx_buff.pos+=tx_length;
-    	CDC_Device_SendData(&VirtualSerial_CDC_Interface, tx, tx_length);
+    	if (tx_width == 8)
+    		CDC_Device_SendData(&VirtualSerial_CDC_Interface, tx, tx_length);
+    	else
+    		CDC_Device_SendData(&VirtualSerial_CDC_Interface, tx, 2*tx_length);
 		CDC_Device_Flush(&VirtualSerial_CDC_Interface);
     }
     else
@@ -678,14 +754,13 @@ int serial_tx_asynch(serial_t *obj, const void *tx, size_t tx_length, uint8_t tx
     return tx_length;
 }
 
-/**
- * Begin asynchronous RX transfer (enable interrupt for data collecting)
- * The used buffer is specified in the serial object, rx_buff
+/** Begin asynchronous RX transfer (enable interrupt for data collecting)
+ *  The used buffer is specified in the serial object - rx_buff
  *
  * @param obj        The serial object
- * @param rx         The buffer for sending
- * @param rx_length  The number of words to transmit
- * @param rx_width   The bit width of buffer word
+ * @param rx         The receive buffer
+ * @param rx_length  The number of bytes to receive
+ * @param rx_width   Deprecated argument
  * @param handler    The serial handler
  * @param event      The logical OR of events to be registered
  * @param handler    The serial handler
@@ -719,17 +794,24 @@ void serial_rx_asynch(serial_t *obj, void *rx, size_t rx_length, uint8_t rx_widt
 
     obj_s->rx_busy = 1;
 
-    XMC_USIC_CH_RXFIFO_Flush((XMC_USIC_CH_t*)obj_s->uart);
-
-    if (obj->rx_buff.width == 16)
-    	rx_length = rx_length << 1;
-
-    if (rx_length > FIFO_BUFFER_SIZE)
-    	XMC_USIC_CH_RXFIFO_SetSizeTriggerLimit((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_FIFO_SIZE_16WORDS, FIFO_BUFFER_SIZE - 1);
+    if (obj_s->usb)
+    {
+    	usb_irq_async = 1;
+    }
     else
-    	XMC_USIC_CH_RXFIFO_SetSizeTriggerLimit((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_FIFO_SIZE_16WORDS, rx_length - 1);
+    {
+		XMC_USIC_CH_RXFIFO_Flush((XMC_USIC_CH_t*)obj_s->uart);
 
-    XMC_USIC_CH_RXFIFO_EnableEvent((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_RXFIFO_EVENT_CONF_STANDARD | XMC_USIC_CH_RXFIFO_EVENT_CONF_ALTERNATE);
+		if (obj->rx_buff.width == 16)
+			rx_length = rx_length << 1;
+
+		if (rx_length > FIFO_BUFFER_SIZE)
+			XMC_USIC_CH_RXFIFO_SetSizeTriggerLimit((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_FIFO_SIZE_16WORDS, FIFO_BUFFER_SIZE - 1);
+		else
+			XMC_USIC_CH_RXFIFO_SetSizeTriggerLimit((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_FIFO_SIZE_16WORDS, rx_length - 1);
+
+		XMC_USIC_CH_RXFIFO_EnableEvent((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_RXFIFO_EVENT_CONF_STANDARD | XMC_USIC_CH_RXFIFO_EVENT_CONF_ALTERNATE);
+    }
 }
 
 /**
@@ -777,6 +859,8 @@ int serial_irq_handler_asynch(serial_t *obj)
     if (obj_s->usb)
     {
     	XMC_USBD_IRQHandler(&USB_runtime);
+    	return_event = usb_async_event;
+    	usb_async_event = 0;
     }
     else //UART
     {
@@ -850,38 +934,38 @@ int serial_irq_handler_asynch(serial_t *obj)
 					XMC_USIC_CH_RXFIFO_SetSizeTriggerLimit((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_FIFO_SIZE_16WORDS, level-1);
 			}
 
-			//Check if char_match is present
-			if (obj_s->events & SERIAL_EVENT_RX_CHARACTER_MATCH)
-			{
-				uint8_t *buf = (uint8_t*)(obj->rx_buff.buffer);
-
-				if (buf != NULL)
-				{
-					uint8_t length;
-
-					if (obj->rx_buff.width == 16)
-						length = obj->rx_buff.pos << 1;
-					else
-						length = obj->rx_buff.pos;
-
-					for (uint8_t i = 0; i < length; i++) {
-						if (buf[i] == obj->char_match)
-						{
-							if (obj->rx_buff.width == 16)
-								obj->rx_buff.pos = i>>1;
-							else
-								obj->rx_buff.pos = i;
-							return_event |= (SERIAL_EVENT_RX_CHARACTER_MATCH & obj_s->events);
-							serial_rx_abort_asynch(obj);
-							break;
-						}
-					}
-				}
-			}
-
 			XMC_USIC_CH_RXFIFO_ClearEvent((XMC_USIC_CH_t*)obj_s->uart, XMC_USIC_CH_RXFIFO_EVENT_STANDARD | XMC_USIC_CH_RXFIFO_EVENT_ALTERNATE);
 		}
     }
+
+    //Check if char_match is present
+	if (obj_s->events & SERIAL_EVENT_RX_CHARACTER_MATCH)
+	{
+		uint8_t *buf = (uint8_t*)(obj->rx_buff.buffer);
+
+		if (buf != NULL)
+		{
+			uint8_t length;
+
+			if (obj->rx_buff.width == 16)
+				length = obj->rx_buff.pos << 1;
+			else
+				length = obj->rx_buff.pos;
+
+			for (uint8_t i = 0; i < length; i++) {
+				if (buf[i] == obj->char_match)
+				{
+					if (obj->rx_buff.width == 16)
+						obj->rx_buff.pos = i>>1;
+					else
+						obj->rx_buff.pos = i;
+					return_event |= (SERIAL_EVENT_RX_CHARACTER_MATCH & obj_s->events);
+					serial_rx_abort_asynch(obj);
+					break;
+				}
+			}
+		}
+	}
 
     return return_event;
 }
