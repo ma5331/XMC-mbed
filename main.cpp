@@ -1,25 +1,13 @@
 #include "mbed.h"
 
-Serial pc(USBTX, USBRX);
+PwmOut led(LED1);
 
-void callback_rx(int events)
+int main(void)
 {
-	static int pos = 0;
+	led.period_us(1000);
+	led.pulsewidth_us(50);
 
-	pos++;
-}
-
-event_callback_t functionpointer;
-
-int main()
-{
-	char buffer[20] = {0};
-
-	functionpointer=callback_rx;
-	pc.read((uint16_t*)buffer, 10, functionpointer, SERIAL_EVENT_RX_CHARACTER_MATCH);
-
-	while (1)
-	{
-
-	}
+    while (1)
+    {
+    }
 }
